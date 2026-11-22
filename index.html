@@ -500,6 +500,34 @@
                 </div>
             </div>
 
+            <!-- 多設備資料同步（JSON 匯出與無損合併） -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mt-4">
+            <h3 class="font-bold text-slate-800 text-base mb-1 flex items-center gap-2">
+                <span>🔄 多設備資料備份與彙整 (JSON)</span>
+            </h3>
+            <p class="text-xs text-slate-500 mb-3 leading-relaxed">
+                可將本機紀錄匯出為含時間戳記的 JSON 檔；匯入其他手機的檔案時，系統會<b>自動保留本機原有資料</b>，僅補入新紀錄並依時間重新排序。
+            </p>
+
+            <div class="grid grid-cols-2 gap-3">
+                <!-- 匯出按鈕 -->
+                <button type="button" onclick="exportRecordsJSON()"
+                class="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-teal-600 text-white font-medium text-sm active:scale-95 transition shadow-sm">
+                <span>📤 匯出備份檔</span>
+                </button>
+
+                <!-- 匯入合併按鈕 -->
+                <label for="jsonImportInput"
+                class="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-slate-800 text-white font-medium text-sm active:scale-95 transition shadow-sm cursor-pointer">
+                <span>📥 匯入並彙整</span>
+                </label>
+                <input type="file" id="jsonImportInput" accept=".json,application/json" class="hidden" onchange="importAndMergeJSON(event)">
+            </div>
+
+            <!-- 匯入結果提示訊息 -->
+            <div id="syncStatusMsg" class="hidden mt-3 p-2.5 rounded-xl text-xs font-medium"></div>
+            </div>
+
             <!-- 貓咪糖尿病照護指南 -->
             <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
                 <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
@@ -1653,6 +1681,187 @@
             closeCatProfileModal();
             generateVetReportText();
             showToast('已更新貓咪基本資料');
+        }
+        // ==========================================
+        // 多設備 JSON 匯出與無損時間排序合併模組
+        // ==========================================
+
+        // 1. 自動偵測現有 localStorage 儲存鍵名（相容舊版資料）
+        function getStorageKey() {
+        const candidateKeys = ['catSugarRecords', 'cat_diabetes_records', 'sugarCatRecords', 'records'];
+        for (const key of candidateKeys) {
+            if (localStorage.getItem(key) !== null) return key;
+        }
+        // 若為全新環境，預設尋找包含陣列結構的 key，否則使用 'catSugarRecords'
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            try {
+            const parsed = JSON.parse(localStorage.getItem(k));
+            if (Array.isArray(parsed)) return k;
+            } catch (e) {}
+        }
+        return 'catSugarRecords';
+        }
+
+        // 2. 產生唯一指紋（確保同筆資料重複匯入不會重複計算，且能相容無 id 的舊資料）
+        function getRecordFingerprint(rec) {
+        if (rec.id) return String(rec.id);
+        const d = rec.date || '';
+        const t = rec.time || '';
+        const bg = rec.bg ?? rec.glucose ?? '';
+        const ins = rec.insulin ?? rec.dose ?? '';
+        return `${d}_${t}_${bg}_${ins}`;
+        }
+
+        // 3. 計算可比較的標準時間戳記（供精準排序用）
+        function getRecordSortTime(rec) {
+        if (rec.date && rec.time) {
+            const dt = new Date(`${rec.date}T${rec.time}`);
+            if (!isNaN(dt.getTime())) return dt.getTime();
+        }
+        if (rec.timestamp) return Number(rec.timestamp);
+        if (rec.datetime) {
+            const dt = new Date(rec.datetime);
+            if (!isNaN(dt.getTime())) return dt.getTime();
+        }
+        return 0;
+        }
+
+        // 4. 匯出 JSON（檔名與內容皆包含精確時間）
+        function exportRecordsJSON() {
+        const storageKey = getStorageKey();
+        let records = [];
+        try {
+            records = JSON.parse(localStorage.getItem(storageKey)) || [];
+        } catch (e) {
+            records = [];
+        }
+
+        if (records.length === 0) {
+            showSyncMessage('目前本機沒有可匯出的紀錄。', 'warn');
+            return;
+        }
+
+        // 確保每筆紀錄都有 id 與 timestamp 方便跨設備追蹤
+        const normalizedRecords = records.map((r, idx) => ({
+            ...r,
+            id: r.id || `rec_${getRecordSortTime(r) || Date.now()}_${idx}`,
+            timestamp: r.timestamp || getRecordSortTime(r)
+        }));
+
+        // 依時間由舊到新排序
+        normalizedRecords.sort((a, b) => getRecordSortTime(a) - getRecordSortTime(b));
+
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const fileTimestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+        const payload = {
+            app: 'CatSugar Care',
+            version: 1,
+            exportedAt: now.toISOString(),
+            recordCount: normalizedRecords.length,
+            records: normalizedRecords
+        };
+
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `CatSugar_${fileTimestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showSyncMessage(`✅ 已成功匯出 ${normalizedRecords.length} 筆紀錄（檔名含時間戳記）。`, 'success');
+        }
+
+        // 5. 匯入 A 手機的 JSON 並無損合併至 B 手機原有資料
+        function importAndMergeJSON(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+            const rawData = JSON.parse(e.target.result);
+            // 支援標準包裝格式 { records: [...] } 或純陣列 [...]
+            const incomingRecords = Array.isArray(rawData) ? rawData : rawData.records;
+
+            if (!Array.isArray(incomingRecords)) {
+                throw new Error('檔案格式不符，找不到紀錄清單');
+            }
+
+            const storageKey = getStorageKey();
+            let existingRecords = [];
+            try {
+                existingRecords = JSON.parse(localStorage.getItem(storageKey)) || [];
+            } catch (err) {
+                existingRecords = [];
+            }
+
+            // 建立 B 手機原有資料的指紋集合
+            const existingFingerprints = new Set(existingRecords.map(getRecordFingerprint));
+
+            let addedCount = 0;
+            let duplicateCount = 0;
+            const mergedRecords = [...existingRecords];
+
+            incomingRecords.forEach((rec, idx) => {
+                const fp = getRecordFingerprint(rec);
+                if (!existingFingerprints.has(fp)) {
+                existingFingerprints.add(fp);
+                mergedRecords.push({
+                    ...rec,
+                    id: rec.id || `rec_${getRecordSortTime(rec) || Date.now()}_imp${idx}`,
+                    timestamp: rec.timestamp || getRecordSortTime(rec)
+                });
+                addedCount++;
+                } else {
+                duplicateCount++;
+                }
+            });
+
+            // 依紀錄日期與時間重新排序（由舊到新，確保圖表時間軸正確）
+            mergedRecords.sort((a, b) => getRecordSortTime(a) - getRecordSortTime(b));
+
+            // 寫回 B 手機本機儲存
+            localStorage.setItem(storageKey, JSON.stringify(mergedRecords));
+
+            showSyncMessage(
+                `✅ 彙整完成！新增了 ${addedCount} 筆外部紀錄，略過 ${duplicateCount} 筆重複資料（目前共 ${mergedRecords.length} 筆，已依時間排序）。畫面即將重新整理...`,
+                'success'
+            );
+
+            // 1.5 秒後自動重整畫面以更新所有趨勢圖與列表
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+
+            } catch (err) {
+            showSyncMessage(`❌ 匯入失敗：${err.message}`, 'error');
+            } finally {
+            // 清空 input 讓同一個檔案可再次選取測試
+            event.target.value = '';
+            }
+        };
+        reader.readAsText(file);
+        }
+
+        // 顯示操作狀態提示框
+        function showSyncMessage(text, type) {
+        const box = document.getElementById('syncStatusMsg');
+        if (!box) {
+            alert(text);
+            return;
+        }
+        box.textContent = text;
+        box.className = 'mt-3 p-2.5 rounded-xl text-xs font-medium block ' + (
+            type === 'success' ? 'bg-teal-50 text-teal-800 border border-teal-200' :
+            type === 'warn'    ? 'bg-amber-50 text-amber-800 border border-amber-200' :
+                                'bg-rose-50 text-rose-800 border border-rose-200'
+        );
         }
     </script>
     <script>
