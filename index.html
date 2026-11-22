@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="糖貓日記">
+    <meta name="theme-color" content="#0d9488">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icon.svg">
+    <title>糖貓日記 CatSugar Care - 糖尿病貓咪血糖追蹤</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Chart.js 與註解外掛 (Annotation Plugin) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- 引入 Google Fonts Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Inter"', '"Noto Sans TC"', 'sans-serif'],
+                    },
+                    colors: {
+                        warm: {
+                            50: '#FDFBF7',
+                            100: '#F8F3E9',
+                            200: '#EFE4D0',
+                            500: '#E08E45',
+                            600: '#C8732C',
+                        },
+                        teal: {
+                            50: '#F0F9F8',
+                            100: '#D9F0EC',
+                            500: '#2A9D8F',
+                            600: '#218276',
+                            700: '#1A685F',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 自定義捲軸與基礎樣式 */
+        body {
+            background-color: #F5F2EB;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* 隱藏數字輸入框預設上下箭頭 */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        /* 列印樣式優化 (方便存成 PDF 給獸醫) */
+        @media print {
+            body { background-color: white !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .app-container { max-width: 100% !important; box-shadow: none !important; padding-bottom: 0 !important; }
+        }
+        .print-only { display: none; }
+        
+        /* 底部導覽列安全區域適配 */
+        .pb-safe {
+            padding-bottom: env(safe-area-inset-bottom, 16px);
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased selection:bg-teal-100 selection:text-teal-800">
+
+    <!-- 手機框架容器 (桌面瀏覽時置中模擬手機體驗，手機上滿版) -->
+    <div class="app-container max-w-md mx-auto min-h-screen bg-warm-50 shadow-xl relative pb-24 flex flex-col">
+
+        <!-- 頂部狀態列 -->
+        <header class="bg-white/90 backdrop-blur-md sticky top-0 z-30 border-b border-stone-200/80 px-4 py-3 flex items-center justify-between no-print">
+            <div class="flex items-center gap-2.5">
+                <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-600 text-white flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-cat text-lg"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-1.5">
+                        <h1 class="font-bold text-base text-slate-800 leading-tight">糖貓日記</h1>
+                        <span id="catNameBadge" onclick="openCatProfileModal()" class="text-xs bg-warm-100 text-warm-600 font-semibold px-2 py-0.5 rounded-full cursor-pointer hover:bg-warm-200 transition">
+                            橘子 🐾
+                        </span>
+                    </div>
+                    <p class="text-[11px] text-slate-500" id="headerSubtitle">穩定控糖，陪伴長久</p>
+                </div>
+            </div>
+
+            <!-- 單位切換開關 (mg/dL <-> mmol/L) -->
+            <div class="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200/60">
+                <button id="unitMgBtn" onclick="setGlobalUnit('mg/dL')" class="px-2.5 py-1 text-xs font-bold rounded-lg transition-all bg-white text-teal-700 shadow-sm">
+                    mg/dL
+                </button>
+                <button id="unitMmolBtn" onclick="setGlobalUnit('mmol/L')" class="px-2.5 py-1 text-xs font-bold rounded-lg transition-all text-slate-500 hover:text-slate-700">
+                    mmol/L
+                </button>
+            </div>
+        </header>
+
+        <!-- 範例資料提示橫幅 -->
+        <div id="demoBanner" class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-800 no-print">
+            <div class="flex items-center gap-1.5">
+                <i class="fa-solid fa-sparkles text-amber-500"></i>
+                <span>目前顯示內建示範數據，方便預覽圖表</span>
+            </div>
+            <button onclick="confirmClearDemoData()" class="font-bold underline text-amber-900 hover:text-amber-700 whitespace-nowrap ml-2">
+                清空開始記錄
+            </button>
+        </div>
+
+        <!-- 全域提示訊息 Toast -->
+        <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white px-4 py-2.5 rounded-2xl shadow-lg text-sm font-medium flex items-center gap-2 transition-all duration-300 opacity-0 pointer-events-none translate-y-[-10px]">
+            <i id="toastIcon" class="fa-solid fa-circle-check text-teal-400"></i>
+            <span id="toastMsg">已儲存紀錄</span>
+        </div>
+
+        <!-- ==================== 分頁 1: 今日紀錄 (快速表單) ==================== -->
+        <main id="tab-record" class="p-4 space-y-4 flex-1">
+            
+            <!-- 編輯模式提示條 -->
+            <div id="editModeBar" class="hidden bg-indigo-50 border border-indigo-200 rounded-2xl p-3 flex items-center justify-between">
+                <div class="flex items-center gap-2 text-indigo-800 text-sm font-semibold">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>正在編輯歷史紀錄</span>
+                </div>
+                <button type="button" onclick="cancelEdit()" class="text-xs bg-white text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-200 font-medium">
+                    取消編輯
+                </button>
+            </div>
+
+            <!-- 緊急低血糖警告卡片 (預設隱藏，當數值 < 60 mg/dL 時即時顯示) -->
+            <div id="hypoAlertCard" class="hidden bg-red-50 border-2 border-red-500 rounded-2xl p-4 shadow-md animate-pulse">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                        <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+                    </div>
+                    <div class="space-y-1.5">
+                        <h3 class="font-bold text-red-800 text-base">⚠️ 緊急低血糖警戒！(&lt;60 mg/dL)</h3>
+                        <p class="text-xs text-red-700 leading-relaxed font-medium">
+                            貓咪可能發生低血糖休克，請<strong>切勿施打胰島素</strong>，並立即執行以下步驟：
+                        </p>
+                        <ul class="text-xs text-red-800 list-disc pl-4 space-y-1 font-medium">
+                            <li><strong>意識清醒且能吞嚥：</strong>立即餵食平時愛吃的罐頭或乾糧。</li>
+                            <li><strong>虛弱或無法進食：</strong>用手指沾取<strong>蜂蜜、楓糖漿或葡萄糖水</strong>塗抹在貓咪牙齦與舌下（勿強灌液體以免嗆到）。</li>
+                            <li><strong>15 分鐘後重測血糖</strong>，並立即聯繫獸醫院！</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <form id="recordForm" onsubmit="handleSaveRecord(event)" class="space-y-4">
+                <input type="hidden" id="recordId" value="">
+
+                <!-- 卡片 1: 時間與情境 -->
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-regular fa-clock text-teal-600"></i> 測量日期與時間
+                        </label>
+                        <button type="button" onclick="setNowTime()" class="text-xs text-teal-600 font-semibold hover:underline">
+                            設為現在
+                        </button>
+                    </div>
+                    <input type="datetime-local" id="recordTime" required
+                        class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition">
+
+                    <!-- 測量時間點標籤 -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-2">測量時間點 / 情境</label>
+                        <div class="grid grid-cols-2 gap-2" id="timingGroup">
+                            <button type="button" data-val="AMPS" onclick="selectSingleOption('timingGroup', this)" class="opt-btn active py-2 px-3 rounded-xl text-xs font-bold border border-teal-500 bg-teal-50 text-teal-700 text-left flex items-center justify-between">
+                                <span>🌅 早餐前 AMPS</span>
+                                <i class="fa-solid fa-check text-[10px]"></i>
+                            </button>
+                            <button type="button" data-val="PMPS" onclick="selectSingleOption('timingGroup', this)" class="opt-btn py-2 px-3 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-left flex items-center justify-between">
+                                <span>🌙 晚餐前 PMPS</span>
+                                <i class="fa-solid fa-check text-[10px] hidden"></i>
+                            </button>
+                            <button type="button" data-val="Nadir" onclick="selectSingleOption('timingGroup', this)" class="opt-btn py-2 px-3 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-left flex items-center justify-between">
+                                <span>📉 曲線追蹤/波谷</span>
+                                <i class="fa-solid fa-check text-[10px] hidden"></i>
+                            </button>
+                            <button type="button" data-val="Other" onclick="selectSingleOption('timingGroup', this)" class="opt-btn py-2 px-3 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-left flex items-center justify-between">
+                                <span>⏱️ 其他時段</span>
+                                <i class="fa-solid fa-check text-[10px] hidden"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 卡片 2: 血糖數值 -->
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <label for="bgInput" class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-droplet text-rose-500"></i> 血糖數值 (<span class="unit-label">mg/dL</span>)
+                        </label>
+                        <!-- 即時血糖狀態標籤 -->
+                        <span id="bgStatusBadge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-stone-100 text-slate-400">
+                            尚未輸入數值
+                        </span>
+                    </div>
+
+                    <div class="relative flex items-center">
+                        <input type="number" step="0.1" id="bgInput" placeholder="例如: 125" oninput="evaluateBgInput()"
+                            class="w-full bg-stone-50 border-2 border-stone-200 rounded-2xl px-4 py-3.5 text-3xl font-bold text-slate-800 placeholder:text-stone-300 placeholder:text-xl focus:outline-none focus:border-teal-500 focus:bg-white transition text-center">
+                        <span class="unit-label absolute right-4 text-sm font-bold text-slate-400">mg/dL</span>
+                    </div>
+                    <p id="bgConversionHint" class="text-center text-xs text-slate-400 h-4"></p>
+                </div>
+
+                <!-- 卡片 3: 胰島素施打紀錄 -->
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-syringe text-teal-600"></i> 胰島素注射 (Units)
+                        </label>
+                        <button type="button" onclick="setInsulinZero()" class="text-xs text-slate-400 hover:text-slate-600 font-medium">
+                            本次未施打 (0 U)
+                        </button>
+                    </div>
+
+                    <!-- 0.25 U 步進微調器 -->
+                    <div class="flex items-center justify-between bg-stone-50 p-2 rounded-2xl border border-stone-200/80">
+                        <button type="button" onclick="adjustInsulin(-0.25)" class="w-12 h-12 rounded-xl bg-white border border-stone-200 shadow-sm text-slate-700 font-bold text-lg active:scale-95 transition flex items-center justify-center">
+                            <i class="fa-solid fa-minus"></i>
+                        </button>
+                        <div class="text-center">
+                            <div class="flex items-baseline justify-center gap-1">
+                                <input type="number" step="0.25" min="0" max="20" id="insulinInput" value="1.5"
+                                    class="w-24 text-center bg-transparent text-2xl font-bold text-teal-700 focus:outline-none">
+                                <span class="text-sm font-bold text-teal-600">U</span>
+                            </div>
+                            <span class="text-[11px] text-slate-400">每次加減 0.25 U</span>
+                        </div>
+                        <button type="button" onclick="adjustInsulin(0.25)" class="w-12 h-12 rounded-xl bg-teal-600 text-white shadow-sm font-bold text-lg active:scale-95 transition flex items-center justify-center">
+                            <i class="fa-solid fa-plus"></i>
+                        </button>
+                    </div>
+
+                    <!-- 注射部位輪替 -->
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="text-xs font-bold text-slate-500">注射部位輪替</label>
+                            <span id="lastSiteHint" class="text-[11px] text-teal-600 font-medium">建議輪替不同部位</span>
+                        </div>
+                        <div class="grid grid-cols-4 gap-1.5" id="siteGroup">
+                            <button type="button" data-val="左肩胛" onclick="selectSingleOption('siteGroup', this)" class="opt-btn active py-2 px-1 rounded-xl text-xs font-bold border border-teal-500 bg-teal-50 text-teal-700 text-center">
+                                左肩胛
+                            </button>
+                            <button type="button" data-val="右肩胛" onclick="selectSingleOption('siteGroup', this)" class="opt-btn py-2 px-1 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-center">
+                                右肩胛
+                            </button>
+                            <button type="button" data-val="左側腹" onclick="selectSingleOption('siteGroup', this)" class="opt-btn py-2 px-1 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-center">
+                                左側腹
+                            </button>
+                            <button type="button" data-val="右側腹" onclick="selectSingleOption('siteGroup', this)" class="opt-btn py-2 px-1 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600 text-center">
+                                右側腹
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 卡片 4: 飲食、喝水與排泄狀態 -->
+                <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3.5">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-bowl-food text-warm-500"></i> 飲食與生理觀察
+                    </label>
+
+                    <!-- 進食狀況 -->
+                    <div>
+                        <span class="text-xs text-slate-500 font-medium block mb-1.5">進食狀況</span>
+                        <div class="grid grid-cols-3 gap-2" id="appetiteGroup">
+                            <button type="button" data-val="全吃完" onclick="selectSingleOption('appetiteGroup', this)" class="opt-btn active py-2 rounded-xl text-xs font-bold border border-teal-500 bg-teal-50 text-teal-700">
+                                😋 全吃完
+                            </button>
+                            <button type="button" data-val="吃一半" onclick="selectSingleOption('appetiteGroup', this)" class="opt-btn py-2 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600">
+                                😐 吃一半
+                            </button>
+                            <button type="button" data-val="食慾差" onclick="selectSingleOption('appetiteGroup', this)" class="opt-btn py-2 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600">
+                                😿 食慾差
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 飲水與尿量 (雙欄) -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <span class="text-xs text-slate-500 font-medium block mb-1.5">飲水量</span>
+                            <div class="grid grid-cols-2 gap-1.5" id="waterGroup">
+                                <button type="button" data-val="正常" onclick="selectSingleOption('waterGroup', this)" class="opt-btn active py-2 rounded-xl text-xs font-bold border border-teal-500 bg-teal-50 text-teal-700">
+                                    正常
+                                </button>
+                                <button type="button" data-val="偏多" onclick="selectSingleOption('waterGroup', this)" class="opt-btn py-2 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600">
+                                    💧偏多
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="text-xs text-slate-500 font-medium block mb-1.5">尿量/尿塊</span>
+                            <div class="grid grid-cols-2 gap-1.5" id="urineGroup">
+                                <button type="button" data-val="正常" onclick="selectSingleOption('urineGroup', this)" class="opt-btn active py-2 rounded-xl text-xs font-bold border border-teal-500 bg-teal-50 text-teal-700">
+                                    正常
+                                </button>
+                                <button type="button" data-val="偏多" onclick="selectSingleOption('urineGroup', this)" class="opt-btn py-2 rounded-xl text-xs font-semibold border border-stone-200 bg-white text-slate-600">
+                                    💦偏多
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 備註欄 -->
+                    <div>
+                        <span class="text-xs text-slate-500 font-medium block mb-1.5">精神狀態與備註</span>
+                        <textarea id="noteInput" rows="2" placeholder="例如：精神很好會討摸、施打時毛有濕濕的（可能漏針）、無嘔吐..."
+                            class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white"></textarea>
+                    </div>
+                </div>
+
+                <!-- 儲存按鈕 -->
+                <button type="submit" id="saveBtn" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-teal-600 to-teal-500 text-white font-bold text-base shadow-md shadow-teal-600/20 active:scale-[0.98] transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                    <span>儲存這筆紀錄</span>
+                </button>
+            </form>
+        </main>
+
+        <!-- ==================== 分頁 2: 趨勢圖表分析 ==================== -->
+        <main id="tab-charts" class="p-4 space-y-4 flex-1 hidden">
+            
+            <!-- 圖表模式切換器 -->
+            <div class="bg-white p-1.5 rounded-2xl shadow-sm border border-stone-100 grid grid-cols-2 gap-1">
+                <button id="modeTrendBtn" onclick="switchChartMode('trend')" class="py-2 rounded-xl text-xs font-bold bg-teal-600 text-white shadow-sm transition">
+                    📈 多日血糖趨勢
+                </button>
+                <button id="modeCurveBtn" onclick="switchChartMode('curve')" class="py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-stone-50 transition">
+                    📉 單日血糖曲線 (BGC)
+                </button>
+            </div>
+
+            <!-- 子選項控制列 (依據模式動態切換) -->
+            <div id="trendRangeBar" class="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-stone-100">
+                <span class="text-xs font-bold text-slate-500">統計區間：</span>
+                <div class="flex gap-1.5">
+                    <button onclick="setTrendDays(7)" data-days="7" class="days-btn px-3 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">近 7 天</button>
+                    <button onclick="setTrendDays(14)" data-days="14" class="days-btn px-3 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-stone-100">近 14 天</button>
+                    <button onclick="setTrendDays(30)" data-days="30" class="days-btn px-3 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-stone-100">近 30 天</button>
+                </div>
+            </div>
+
+            <div id="curveDateBar" class="hidden flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-stone-100">
+                <span class="text-xs font-bold text-slate-500">選擇曲線日期：</span>
+                <select id="curveDateSelect" onchange="renderChart()" class="bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1 text-xs font-bold text-teal-700 focus:outline-none">
+                    <!-- 動態填入有紀錄的日期 -->
+                </select>
+            </div>
+
+            <!-- 4 格統計摘要卡片 -->
+            <div class="grid grid-cols-2 gap-2.5">
+                <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-100">
+                    <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                        <span>平均血糖</span>
+                        <i class="fa-solid fa-chart-simple text-teal-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-1">
+                        <span id="statAvgBg" class="text-2xl font-bold text-slate-800">--</span>
+                        <span class="unit-label text-[11px] font-bold text-slate-400">mg/dL</span>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-100">
+                    <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                        <span>最低點 (Nadir) / 最高</span>
+                        <i class="fa-solid fa-arrows-up-down text-amber-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-1">
+                        <span id="statMinMaxBg" class="text-lg font-bold text-slate-800">-- / --</span>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-100">
+                    <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                        <span>理想區間達標率</span>
+                        <i class="fa-solid fa-bullseye text-emerald-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-1">
+                        <span id="statInRange" class="text-2xl font-bold text-emerald-600">--%</span>
+                        <span class="text-[10px] text-slate-400">(80-150)</span>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-100">
+                    <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                        <span>平均單次劑量</span>
+                        <i class="fa-solid fa-syringe text-indigo-500"></i>
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-1">
+                        <span id="statAvgInsulin" class="text-2xl font-bold text-slate-800">--</span>
+                        <span class="text-xs font-bold text-slate-400">U</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 圖表主畫布卡片 -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-stone-100 space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 id="chartTitle" class="text-sm font-bold text-slate-800">血糖變化趨勢圖</h3>
+                    <div class="flex items-center gap-2 text-[10px] font-semibold">
+                        <span class="flex items-center gap-1 text-emerald-700">
+                            <span class="w-2.5 h-2.5 rounded-sm bg-emerald-500/20 border border-emerald-500/40 inline-block"></span> 理想區間
+                        </span>
+                        <span class="flex items-center gap-1 text-rose-600">
+                            <span class="w-2.5 h-0.5 bg-rose-500 inline-block"></span> 低血糖線
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 響應式 Chart.js 容器 -->
+                <div class="relative w-full h-64">
+                    <canvas id="bgChartCanvas"></canvas>
+                </div>
+
+                <!-- Nadir 說明提示 -->
+                <div id="nadirCallout" class="hidden bg-teal-50 border border-teal-200 rounded-xl p-2.5 text-xs text-teal-800 flex items-center gap-2">
+                    <i class="fa-solid fa-star text-teal-600"></i>
+                    <span id="nadirText">當日最低點 (Nadir) 出現在 14:00，數值為 92 mg/dL。</span>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- ==================== 分頁 3: 歷史日誌 ==================== -->
+        <main id="tab-history" class="p-4 space-y-4 flex-1 hidden">
+            <div class="flex items-center justify-between">
+                <h2 class="text-base font-bold text-slate-800">完整照護日誌</h2>
+                <span id="totalRecordsCount" class="text-xs font-semibold text-slate-500 bg-white px-2.5 py-1 rounded-full border border-stone-200">
+                    共 0 筆
+                </span>
+            </div>
+
+            <!-- 依日期分組的清單容器 -->
+            <div id="historyListContainer" class="space-y-4">
+                <!-- 由 JS 動態渲染 -->
+            </div>
+        </main>
+
+        <!-- ==================== 分頁 4: 匯出與衛教 ==================== -->
+        <main id="tab-export" class="p-4 space-y-4 flex-1 hidden">
+            
+            <!-- 獸醫回診報告產生器 -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
+                        <i class="fa-solid fa-file-medical text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-800">獸醫回診摘要報告</h3>
+                        <p class="text-xs text-slate-500">一鍵整理近期血糖與劑量，方便傳給醫師</p>
+                    </div>
+                </div>
+
+                <div class="bg-stone-50 border border-stone-200 rounded-xl p-3">
+                    <pre id="vetSummaryPreview" class="text-xs text-slate-700 whitespace-pre-wrap font-sans leading-relaxed max-h-48 overflow-y-auto"></pre>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="copyVetReport()" class="py-2.5 px-3 rounded-xl bg-teal-600 text-white text-xs font-bold shadow-sm active:scale-95 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-regular fa-copy"></i> 複製文字報告
+                    </button>
+                    <button onclick="window.print()" class="py-2.5 px-3 rounded-xl bg-stone-100 text-slate-700 border border-stone-200 text-xs font-bold active:scale-95 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-print"></i> 列印 / 存成 PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- CSV 試算表匯出與資料備份 -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
+                <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-database text-warm-500"></i> 數據匯出與管理
+                </h3>
+                <button onclick="exportCSV()" class="w-full py-2.5 px-4 rounded-xl bg-warm-500 text-white text-xs font-bold shadow-sm active:scale-95 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-file-csv text-base"></i> 下載 Excel / CSV 完整報表
+                </button>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button onclick="loadDemoDataConfirm()" class="py-2 px-3 rounded-xl border border-stone-200 text-slate-600 text-xs font-semibold hover:bg-stone-50">
+                        載入示範數據
+                    </button>
+                    <button onclick="confirmClearDemoData()" class="py-2 px-3 rounded-xl border border-rose-200 text-rose-600 text-xs font-semibold hover:bg-rose-50">
+                        清空所有紀錄
+                    </button>
+                </div>
+            </div>
+
+            <!-- 貓咪糖尿病照護指南 -->
+            <div class="bg-white rounded-2xl p-4 shadow-sm border border-stone-100 space-y-3">
+                <h3 class="font-bold text-sm text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-book-medical text-teal-600"></i> 糖貓居家照護小百科
+                </h3>
+                
+                <div class="space-y-2.5 text-xs text-slate-600 leading-relaxed">
+                    <div class="p-3 rounded-xl bg-stone-50 border border-stone-100">
+                        <h4 class="font-bold text-slate-800 mb-1">1. 什麼是 AMPS、PMPS 與 Nadir？</h4>
+                        <p><strong>AMPS / PMPS：</strong>分別為「早餐前」與「晚餐前」施打胰島素前的血糖值，用來確認當下是否適合施打。<br>
+                        <strong>Nadir（波谷）：</strong>施打胰島素後血糖降到最低的時間點（通常在施打後 4~8 小時），獸醫師主要依據 Nadir 來決定是否調整劑量。</p>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-stone-50 border border-stone-100">
+                        <h4 class="font-bold text-slate-800 mb-1">2. 血糖數值參考區間 (居家耳血)</h4>
+                        <ul class="space-y-1 mt-1">
+                            <li><span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"></span><strong>&lt; 60 mg/dL (3.3 mmol/L)：</strong>低血糖危險！立即補充糖分並就醫。</li>
+                            <li><span class="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1"></span><strong>80 - 150 mg/dL (4.4 - 8.3 mmol/L)：</strong>理想控制區間。</li>
+                            <li><span class="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1"></span><strong>150 - 250 mg/dL (8.3 - 13.9 mmol/L)：</strong>輕度偏高，持續觀察。</li>
+                            <li><span class="inline-block w-2 h-2 rounded-full bg-orange-600 mr-1"></span><strong>&gt; 250 mg/dL (13.9 mmol/L)：</strong>血糖過高，若持續數日請與獸醫討論。</li>
+                        </ul>
+                    </div>
+
+                    <div class="p-3 rounded-xl bg-stone-50 border border-stone-100">
+                        <h4 class="font-bold text-slate-800 mb-1">3. 胰島素施打黃金原則</h4>
+                        <p>務必<strong>先吃飯、後打針</strong>（確認貓咪有進食再施打）。若貓咪完全拒食或嘔吐，請先暫停施打並詢問獸醫師；切勿自行大幅增減劑量。</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部導覽列 (單手拇指操作優化) -->
+        <nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/95 backdrop-blur-md border-t border-stone-200 px-2 pt-2 pb-safe z-40 no-print">
+            <div class="grid grid-cols-4 gap-1">
+                <button onclick="switchTab('record')" id="nav-record" class="nav-btn active flex flex-col items-center justify-center py-1.5 rounded-xl text-teal-600 font-bold transition">
+                    <i class="fa-solid fa-pen-to-square text-lg mb-0.5"></i>
+                    <span class="text-[11px]">今日紀錄</span>
+                </button>
+                <button onclick="switchTab('charts')" id="nav-charts" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-600 font-medium transition">
+                    <i class="fa-solid fa-chart-line text-lg mb-0.5"></i>
+                    <span class="text-[11px]">趨勢圖表</span>
+                </button>
+                <button onclick="switchTab('history')" id="nav-history" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-600 font-medium transition">
+                    <i class="fa-solid fa-clock-rotate-left text-lg mb-0.5"></i>
+                    <span class="text-[11px]">歷史日誌</span>
+                </button>
+                <button onclick="switchTab('export')" id="nav-export" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-600 font-medium transition">
+                    <i class="fa-solid fa-stethoscope text-lg mb-0.5"></i>
+                    <span class="text-[11px]">回診與衛教</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- 自訂確認對話框 Modal (取代原生 confirm/alert) -->
+        <div id="customModal" class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4 no-print">
+            <div class="bg-white rounded-3xl max-w-xs w-full p-5 shadow-2xl space-y-4 transform transition-all">
+                <div class="flex items-center gap-3">
+                    <div id="modalIconBg" class="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                        <i id="modalIcon" class="fa-solid fa-circle-question text-lg"></i>
+                    </div>
+                    <h3 id="modalTitle" class="font-bold text-base text-slate-800">確認操作</h3>
+                </div>
+                <p id="modalBody" class="text-xs text-slate-600 leading-relaxed">確定要執行此操作嗎？</p>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button onclick="closeCustomModal()" class="py-2.5 rounded-xl bg-stone-100 text-slate-600 text-xs font-bold hover:bg-stone-200 transition">
+                        取消
+                    </button>
+                    <button id="modalConfirmBtn" class="py-2.5 rounded-xl bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 transition">
+                        確定
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 貓咪檔案設定 Modal -->
+        <div id="catProfileModal" class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center p-4 no-print">
+            <div class="bg-white rounded-3xl max-w-xs w-full p-5 shadow-2xl space-y-4">
+                <h3 class="font-bold text-base text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-cat text-warm-500"></i> 貓咪基本資料
+                </h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 block mb-1">貓咪名字</label>
+                        <input type="text" id="inputCatName" value="橘子" class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm font-bold">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 block mb-1">使用胰島素品牌 (如 Lantus 蘭德仕)</label>
+                        <input type="text" id="inputInsulinType" value="Lantus (Glargine)" class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-slate-500 block mb-1">目前體重 (kg)</label>
+                        <input type="number" step="0.1" id="inputCatWeight" value="5.2" class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-2">
+                    <button onclick="closeCatProfileModal()" class="py-2.5 rounded-xl bg-stone-100 text-slate-600 text-xs font-bold">取消</button>
+                    <button onclick="saveCatProfile()" class="py-2.5 rounded-xl bg-teal-600 text-white text-xs font-bold">儲存設定</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ==================== 1. 全域狀態與儲存鍵值 ====================
+        const STORAGE_KEY_RECORDS = 'catsugar_records_v1';
+        const STORAGE_KEY_PROFILE = 'catsugar_profile_v1';
+        const STORAGE_KEY_IS_DEMO = 'catsugar_is_demo_v1';
+
+        let records = [];
+        let currentUnit = 'mg/dL'; // 'mg/dL' 或 'mmol/L'
+        let chartInstance = null;
+        let currentChartMode = 'trend'; // 'trend' 或 'curve'
+        let currentTrendDays = 7;
+
+        let catProfile = {
+            name: '橘子',
+            insulinType: 'Lantus (Glargine)',
+            weight: '5.2'
+        };
+
+        // ==================== 2. 初始化與範例數據產生 ====================
+        window.onload = function() {
+            loadProfile();
+            loadRecords();
+            setNowTime();
+            updateSiteSuggestion();
+            renderAllViews();
+        };
+
+        function loadProfile() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY_PROFILE);
+                if (saved) {
+                    catProfile = JSON.parse(saved);
+                }
+                document.getElementById('catNameBadge').textContent = `${catProfile.name} 🐾`;
+            } catch (e) {
+                console.error('讀取貓咪設定失敗:', e);
+            }
+        }
+
+        function loadRecords() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY_RECORDS);
+                const isDemoFlag = localStorage.getItem(STORAGE_KEY_IS_DEMO);
+
+                if (saved) {
+                    records = JSON.parse(saved);
+                    if (isDemoFlag === 'true') {
+                        document.getElementById('demoBanner').classList.remove('hidden');
+                    } else {
+                        document.getElementById('demoBanner').classList.add('hidden');
+                    }
+                } else {
+                    // 初次開啟自動載入示範數據
+                    records = generateDemoRecords();
+                    saveRecordsToStorage(true);
+                }
+            } catch (e) {
+                console.error('讀取紀錄失敗:', e);
+                records = [];
+            }
+        }
+
+        function saveRecordsToStorage(isDemo = false) {
+            try {
+                // 依時間降序排列 (最新在最前)
+                records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
+                localStorage.setItem(STORAGE_KEY_IS_DEMO, isDemo ? 'true' : 'false');
+
+                if (isDemo) {
+                    document.getElementById('demoBanner').classList.remove('hidden');
+                } else {
+                    document.getElementById('demoBanner').classList.add('hidden');
+                }
+            } catch (e) {
+                showToast('儲存空間已滿或無法寫入', true);
+            }
+        }
+
+        // 產生真實感的示範數據 (包含過去6天 AMPS/PMPS 與昨天完整血糖曲線)
+        function generateDemoRecords() {
+            const demo = [];
+            const now = new Date();
+            const sites = ['左肩胛', '右肩胛', '左側腹', '右側腹'];
+            let siteIdx = 0;
+
+            const formatLocalISO = (dateObj) => {
+                const pad = n => String(n).padStart(2, '0');
+                return `${dateObj.getFullYear()}-${pad(dateObj.getMonth()+1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
+            };
+
+            // 產生過去 5 天的早晚數據 (Day -6 到 Day -2)
+            const pastData = [
+                { dayOffset: 6, am: 265, pm: 248, dose: 1.5 },
+                { dayOffset: 5, am: 235, pm: 218, dose: 1.5 },
+                { dayOffset: 4, am: 210, pm: 195, dose: 1.5 },
+                { dayOffset: 3, am: 188, pm: 176, dose: 1.5 },
+                { dayOffset: 2, am: 168, pm: 155, dose: 1.5 },
+            ];
+
+            pastData.forEach((d, idx) => {
+                const amDate = new Date(now);
+                amDate.setDate(now.getDate() - d.dayOffset);
+                amDate.setHours(7, 30, 0, 0);
+                demo.push({
+                    id: `demo-am-${idx}`,
+                    timestamp: formatLocalISO(amDate),
+                    timing: 'AMPS',
+                    bgMg: d.am,
+                    insulin: d.dose,
+                    site: sites[siteIdx++ % 4],
+                    appetite: '全吃完',
+                    water: d.dayOffset > 4 ? '偏多' : '正常',
+                    urine: d.dayOffset > 4 ? '偏多' : '正常',
+                    note: d.dayOffset === 6 ? '剛開始調整飲食為低碳水主食罐' : ''
+                });
+
+                const pmDate = new Date(now);
+                pmDate.setDate(now.getDate() - d.dayOffset);
+                pmDate.setHours(19, 30, 0, 0);
+                demo.push({
+                    id: `demo-pm-${idx}`,
+                    timestamp: formatLocalISO(pmDate),
+                    timing: 'PMPS',
+                    bgMg: d.pm,
+                    insulin: d.dose,
+                    site: sites[siteIdx++ % 4],
+                    appetite: '全吃完',
+                    water: '正常',
+                    urine: '正常',
+                    note: ''
+                });
+            });
+
+            // 昨天 (Day -1) 做了一次完整的居家血糖曲線 (Blood Glucose Curve)
+            const curvePoints = [
+                { h: 7, m: 30, bg: 162, timing: 'AMPS', insulin: 1.5, note: '早餐前測量，精神不錯' },
+                { h: 10, m: 30, bg: 124, timing: 'Nadir', insulin: 0, note: '施打後 3 小時 (+3)' },
+                { h: 13, m: 30, bg: 92, timing: 'Nadir', insulin: 0, note: '施打後 6 小時 (+6) 達到波谷' },
+                { h: 16, m: 30, bg: 118, timing: 'Nadir', insulin: 0, note: '施打後 9 小時 (+9) 緩慢回升' },
+                { h: 19, m: 30, bg: 154, timing: 'PMPS', insulin: 1.5, note: '晚餐前測量，食慾很好' }
+            ];
+
+            curvePoints.forEach((pt, i) => {
+                const cDate = new Date(now);
+                cDate.setDate(now.getDate() - 1);
+                cDate.setHours(pt.h, pt.m, 0, 0);
+                demo.push({
+                    id: `demo-curve-${i}`,
+                    timestamp: formatLocalISO(cDate),
+                    timing: pt.timing,
+                    bgMg: pt.bg,
+                    insulin: pt.insulin,
+                    site: pt.insulin > 0 ? sites[siteIdx++ % 4] : '未施打',
+                    appetite: pt.insulin > 0 ? '全吃完' : '正常',
+                    water: '正常',
+                    urine: '正常',
+                    note: pt.note
+                });
+            });
+
+            // 今天早上 (Day 0)
+            const todayAm = new Date(now);
+            todayAm.setHours(7, 30, 0, 0);
+            if (todayAm <= now) {
+                demo.push({
+                    id: 'demo-today-am',
+                    timestamp: formatLocalISO(todayAm),
+                    timing: 'AMPS',
+                    bgMg: 145,
+                    insulin: 1.5,
+                    site: sites[siteIdx++ % 4],
+                    appetite: '全吃完',
+                    water: '正常',
+                    urine: '正常',
+                    note: '早上準時討飯吃，控制得很穩定！'
+                });
+            }
+
+            return demo;
+        }
+
+        // ==================== 3. 單位換算與狀態判斷 ====================
+        function mgToMmol(mg) {
+            return +(mg / 18.0182).toFixed(1);
+        }
+
+        function mmolToMg(mmol) {
+            return Math.round(mmol * 18.0182);
+        }
+
+        function formatBgValue(bgMg) {
+            if (bgMg === null || bgMg === undefined || isNaN(bgMg)) return '--';
+            return currentUnit === 'mg/dL' ? Math.round(bgMg) : mgToMmol(bgMg).toFixed(1);
+        }
+
+        function setGlobalUnit(unit) {
+            if (currentUnit === unit) return;
+            
+            // 若輸入框內有數字，同步轉換輸入框數值
+            const bgInput = document.getElementById('bgInput');
+            const currentVal = parseFloat(bgInput.value);
+            if (!isNaN(currentVal) && currentVal > 0) {
+                if (unit === 'mmol/L') {
+                    bgInput.value = mgToMmol(currentVal);
+                } else {
+                    bgInput.value = mmolToMg(currentVal);
+                }
+            }
+
+            currentUnit = unit;
+
+            // 更新按鈕樣式
+            const mgBtn = document.getElementById('unitMgBtn');
+            const mmolBtn = document.getElementById('unitMmolBtn');
+            if (unit === 'mg/dL') {
+                mgBtn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg transition-all bg-white text-teal-700 shadow-sm';
+                mmolBtn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg transition-all text-slate-500 hover:text-slate-700';
+            } else {
+                mmolBtn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg transition-all bg-white text-teal-700 shadow-sm';
+                mgBtn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg transition-all text-slate-500 hover:text-slate-700';
+            }
+
+            // 更新所有單位標籤
+            document.querySelectorAll('.unit-label').forEach(el => el.textContent = unit);
+            bgInput.placeholder = unit === 'mg/dL' ? '例如: 125' : '例如: 6.9';
+
+            evaluateBgInput();
+            renderAllViews();
+        }
+
+        // 依據 mg/dL 判斷血糖狀態等級
+        function getBgCategory(bgMg) {
+            if (bgMg < 60) {
+                return {
+                    label: '⚠️ 低血糖危險',
+                    badgeClass: 'bg-red-100 text-red-700 border border-red-300',
+                    dotColor: '#EF4444',
+                    isHypo: true
+                };
+            } else if (bgMg < 80) {
+                return {
+                    label: '⚡ 偏低注意',
+                    badgeClass: 'bg-amber-100 text-amber-800 border border-amber-300',
+                    dotColor: '#F59E0B',
+                    isHypo: false
+                };
+            } else if (bgMg <= 150) {
+                return {
+                    label: '✅ 理想控制',
+                    badgeClass: 'bg-emerald-100 text-emerald-700 border border-emerald-300',
+                    dotColor: '#10B981',
+                    isHypo: false
+                };
+            } else if (bgMg <= 250) {
+                return {
+                    label: '🔸 輕度偏高',
+                    badgeClass: 'bg-orange-100 text-orange-700 border border-orange-300',
+                    dotColor: '#F97316',
+                    isHypo: false
+                };
+            } else {
+                return {
+                    label: '🔺 血糖過高',
+                    badgeClass: 'bg-rose-100 text-rose-700 border border-rose-300',
+                    dotColor: '#E11D48',
+                    isHypo: false
+                };
+            }
+        }
+
+        // 即時評估表單中的血糖輸入
+        function evaluateBgInput() {
+            const rawVal = parseFloat(document.getElementById('bgInput').value);
+            const badge = document.getElementById('bgStatusBadge');
+            const hint = document.getElementById('bgConversionHint');
+            const hypoCard = document.getElementById('hypoAlertCard');
+
+            if (isNaN(rawVal) || rawVal <= 0) {
+                badge.textContent = '尚未輸入數值';
+                badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full bg-stone-100 text-slate-400';
+                hint.textContent = '';
+                hypoCard.classList.add('hidden');
+                return;
+            }
+
+            const bgMg = currentUnit === 'mg/dL' ? rawVal : mmolToMg(rawVal);
+            const cat = getBgCategory(bgMg);
+
+            badge.textContent = cat.label;
+            badge.className = `text-xs font-bold px-2.5 py-1 rounded-full ${cat.badgeClass}`;
+
+            if (currentUnit === 'mg/dL') {
+                hint.textContent = `約等於 ${mgToMmol(bgMg)} mmol/L`;
+            } else {
+                hint.textContent = `約等於 ${bgMg} mg/dL`;
+            }
+
+            // 低血糖緊急提醒卡片控制
+            if (cat.isHypo) {
+                hypoCard.classList.remove('hidden');
+                // 若低血糖，自動建議將劑量歸零
+                if (parseFloat(document.getElementById('insulinInput').value) > 0) {
+                    setInsulinZero();
+                    showToast('低血糖警戒！已自動將本次胰島素劑量歸零', true);
+                }
+            } else {
+                hypoCard.classList.add('hidden');
+            }
+        }
+
+        // ==================== 4. 表單互動控制 ====================
+        function setNowTime() {
+            const now = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            const formatted = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+            document.getElementById('recordTime').value = formatted;
+
+            // 依據目前小時自動推薦 AMPS 或 PMPS
+            const hour = now.getHours();
+            const timingBtns = document.querySelectorAll('#timingGroup .opt-btn');
+            if (hour >= 5 && hour <= 10) {
+                selectSingleOption('timingGroup', timingBtns[0]); // AMPS
+            } else if (hour >= 17 && hour <= 22) {
+                selectSingleOption('timingGroup', timingBtns[1]); // PMPS
+            }
+        }
+
+        function selectSingleOption(groupId, clickedBtn) {
+            const group = document.getElementById(groupId);
+            group.querySelectorAll('.opt-btn').forEach(btn => {
+                btn.classList.remove('active', 'border-teal-500', 'bg-teal-50', 'text-teal-700', 'font-bold');
+                btn.classList.add('border-stone-200', 'bg-white', 'text-slate-600', 'font-semibold');
+                const icon = btn.querySelector('.fa-check');
+                if (icon) icon.classList.add('hidden');
+            });
+
+            clickedBtn.classList.add('active', 'border-teal-500', 'bg-teal-50', 'text-teal-700', 'font-bold');
+            clickedBtn.classList.remove('border-stone-200', 'bg-white', 'text-slate-600', 'font-semibold');
+            const activeIcon = clickedBtn.querySelector('.fa-check');
+            if (activeIcon) activeIcon.classList.remove('hidden');
+        }
+
+        function getSelectedOption(groupId) {
+            const activeBtn = document.querySelector(`#${groupId} .opt-btn.active`);
+            return activeBtn ? activeBtn.getAttribute('data-val') : '';
+        }
+
+        function adjustInsulin(delta) {
+            const input = document.getElementById('insulinInput');
+            let val = parseFloat(input.value) || 0;
+            val = Math.max(0, Math.round((val + delta) * 100) / 100);
+            input.value = val;
+        }
+
+        function setInsulinZero() {
+            document.getElementById('insulinInput').value = 0;
+        }
+
+        // 智慧提示下一個建議輪替的注射部位
+        function updateSiteSuggestion() {
+            const lastInjection = records.find(r => r.insulin > 0 && r.site && r.site !== '未施打');
+            const hintEl = document.getElementById('lastSiteHint');
+            if (!lastInjection) {
+                hintEl.textContent = '建議輪替不同部位';
+                return;
+            }
+            const order = ['左肩胛', '右肩胛', '左側腹', '右側腹'];
+            const idx = order.indexOf(lastInjection.site);
+            const nextSite = idx !== -1 ? order[(idx + 1) % 4] : '左肩胛';
+            hintEl.textContent = `上次打${lastInjection.site}，建議輪替「${nextSite}」`;
+
+            // 自動選取建議部位 (僅在非編輯模式下)
+            if (!document.getElementById('recordId').value) {
+                const targetBtn = document.querySelector(`#siteGroup .opt-btn[data-val="${nextSite}"]`);
+                if (targetBtn) selectSingleOption('siteGroup', targetBtn);
+            }
+        }
+
+        // 儲存或更新紀錄
+        function handleSaveRecord(e) {
+            e.preventDefault();
+
+            const timestamp = document.getElementById('recordTime').value;
+            const rawBg = parseFloat(document.getElementById('bgInput').value);
+            const insulin = parseFloat(document.getElementById('insulinInput').value) || 0;
+
+            if (isNaN(rawBg) || rawBg <= 0) {
+                showToast('請輸入有效的血糖數值', true);
+                document.getElementById('bgInput').focus();
+                return;
+            }
+
+            const bgMg = currentUnit === 'mg/dL' ? Math.round(rawBg) : mmolToMg(rawBg);
+            const editId = document.getElementById('recordId').value;
+
+            const recordObj = {
+                id: editId || 'rec-' + Date.now(),
+                timestamp: timestamp,
+                timing: getSelectedOption('timingGroup'),
+                bgMg: bgMg,
+                insulin: insulin,
+                site: insulin > 0 ? getSelectedOption('siteGroup') : '未施打',
+                appetite: getSelectedOption('appetiteGroup'),
+                water: getSelectedOption('waterGroup'),
+                urine: getSelectedOption('urineGroup'),
+                note: document.getElementById('noteInput').value.trim()
+            };
+
+            const wasDemo = localStorage.getItem(STORAGE_KEY_IS_DEMO) === 'true';
+
+            if (editId) {
+                const idx = records.findIndex(r => r.id === editId);
+                if (idx !== -1) records[idx] = recordObj;
+                cancelEdit();
+                showToast('紀錄已更新！');
+            } else {
+                records.unshift(recordObj);
+                showToast('已儲存這筆健康紀錄！');
+            }
+
+            saveRecordsToStorage(wasDemo);
+            resetFormAfterSave();
+            renderAllViews();
+        }
+
+        function resetFormAfterSave() {
+            document.getElementById('bgInput').value = '';
+            document.getElementById('noteInput').value = '';
+            document.getElementById('hypoAlertCard').classList.add('hidden');
+            evaluateBgInput();
+            setNowTime();
+            updateSiteSuggestion();
+        }
+
+        // 編輯歷史紀錄
+        function editRecord(id) {
+            const rec = records.find(r => r.id === id);
+            if (!rec) return;
+
+            switchTab('record');
+            document.getElementById('editModeBar').classList.remove('hidden');
+            document.getElementById('saveBtn').innerHTML = '<i class="fa-solid fa-check"></i><span>更新此筆紀錄</span>';
+
+            document.getElementById('recordId').value = rec.id;
+            document.getElementById('recordTime').value = rec.timestamp;
+            document.getElementById('bgInput').value = currentUnit === 'mg/dL' ? rec.bgMg : mgToMmol(rec.bgMg);
+            document.getElementById('insulinInput').value = rec.insulin;
+            document.getElementById('noteInput').value = rec.note || '';
+
+            // 還原選項按鈕
+            const selectByVal = (groupId, val) => {
+                const btn = document.querySelector(`#${groupId} .opt-btn[data-val="${val}"]`);
+                if (btn) selectSingleOption(groupId, btn);
+            };
+            selectByVal('timingGroup', rec.timing);
+            if (rec.site && rec.site !== '未施打') selectByVal('siteGroup', rec.site);
+            selectByVal('appetiteGroup', rec.appetite);
+            selectByVal('waterGroup', rec.water);
+            selectByVal('urineGroup', rec.urine);
+
+            evaluateBgInput();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function cancelEdit() {
+            document.getElementById('recordId').value = '';
+            document.getElementById('editModeBar').classList.add('hidden');
+            document.getElementById('saveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>儲存這筆紀錄</span>';
+            resetFormAfterSave();
+        }
+
+        function deleteRecord(id) {
+            openCustomModal(
+                '刪除紀錄',
+                '確定要刪除這筆血糖與照護紀錄嗎？刪除後無法復原。',
+                () => {
+                    records = records.filter(r => r.id !== id);
+                    const wasDemo = localStorage.getItem(STORAGE_KEY_IS_DEMO) === 'true';
+                    saveRecordsToStorage(wasDemo);
+                    renderAllViews();
+                    showToast('已刪除該筆紀錄');
+                }
+            );
+        }
+
+        // ==================== 5. 分頁導覽切換 ====================
+        function switchTab(tabName) {
+            const tabs = ['record', 'charts', 'history', 'export'];
+            tabs.forEach(t => {
+                document.getElementById(`tab-${t}`).classList.add('hidden');
+                const navBtn = document.getElementById(`nav-${t}`);
+                navBtn.classList.remove('active', 'text-teal-600', 'font-bold');
+                navBtn.classList.add('text-slate-400', 'font-medium');
+            });
+
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            const activeNav = document.getElementById(`nav-${tabName}`);
+            activeNav.classList.add('active', 'text-teal-600', 'font-bold');
+            activeNav.classList.remove('text-slate-400', 'font-medium');
+
+            if (tabName === 'charts') {
+                populateCurveDates();
+                renderChart();
+            } else if (tabName === 'export') {
+                generateVetReportText();
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function renderAllViews() {
+            renderHistoryList();
+            populateCurveDates();
+            if (!document.getElementById('tab-charts').classList.contains('hidden')) {
+                renderChart();
+            }
+            generateVetReportText();
+        }
+
+        // ==================== 6. Chart.js 互動圖表引擎 ====================
+        function switchChartMode(mode) {
+            currentChartMode = mode;
+            const trendBtn = document.getElementById('modeTrendBtn');
+            const curveBtn = document.getElementById('modeCurveBtn');
+
+            if (mode === 'trend') {
+                trendBtn.className = 'py-2 rounded-xl text-xs font-bold bg-teal-600 text-white shadow-sm transition';
+                curveBtn.className = 'py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-stone-50 transition';
+                document.getElementById('trendRangeBar').classList.remove('hidden');
+                document.getElementById('curveDateBar').classList.add('hidden');
+                document.getElementById('nadirCallout').classList.add('hidden');
+            } else {
+                curveBtn.className = 'py-2 rounded-xl text-xs font-bold bg-teal-600 text-white shadow-sm transition';
+                trendBtn.className = 'py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-stone-50 transition';
+                document.getElementById('trendRangeBar').classList.add('hidden');
+                document.getElementById('curveDateBar').classList.remove('hidden');
+                populateCurveDates();
+            }
+            renderChart();
+        }
+
+        function setTrendDays(days) {
+            currentTrendDays = days;
+            document.querySelectorAll('.days-btn').forEach(btn => {
+                if (parseInt(btn.getAttribute('data-days')) === days) {
+                    btn.className = 'days-btn px-3 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200';
+                } else {
+                    btn.className = 'days-btn px-3 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:bg-stone-100';
+                }
+            });
+            renderChart();
+        }
+
+        function populateCurveDates() {
+            const select = document.getElementById('curveDateSelect');
+            const prevSelected = select.value;
+
+            // 統計每天的紀錄筆數
+            const dateCounts = {};
+            records.forEach(r => {
+                const dateStr = r.timestamp.split('T')[0];
+                dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+            });
+
+            const sortedDates = Object.keys(dateCounts).sort((a, b) => b.localeCompare(a));
+            select.innerHTML = '';
+
+            if (sortedDates.length === 0) {
+                select.innerHTML = '<option value="">尚無資料</option>';
+                return;
+            }
+
+            // 優先尋找紀錄筆數 >= 3 的日期作為預設血糖曲線日
+            let bestCurveDate = sortedDates.find(d => dateCounts[d] >= 3) || sortedDates[0];
+
+            sortedDates.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = `${d} (${dateCounts[d]} 筆紀錄)`;
+                select.appendChild(opt);
+            });
+
+            if (prevSelected && sortedDates.includes(prevSelected)) {
+                select.value = prevSelected;
+            } else {
+                select.value = bestCurveDate;
+            }
+        }
+
+        function renderChart() {
+            const ctx = document.getElementById('bgChartCanvas').getContext('2d');
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            let filtered = [];
+            let labels = [];
+            let values = [];
+            let pointColors = [];
+            let nadirIndex = -1;
+
+            if (currentChartMode === 'trend') {
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() - currentTrendDays);
+                filtered = records
+                    .filter(r => new Date(r.timestamp) >= cutoff)
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                document.getElementById('chartTitle').textContent = `近 ${currentTrendDays} 天血糖變化趨勢`;
+
+                labels = filtered.map(r => {
+                    const dt = new Date(r.timestamp);
+                    const m = dt.getMonth() + 1;
+                    const d = dt.getDate();
+                    const period = dt.getHours() < 12 ? '早' : '晚';
+                    return `${m}/${d}${period}`;
+                });
+            } else {
+                const targetDate = document.getElementById('curveDateSelect').value;
+                filtered = records
+                    .filter(r => r.timestamp.startsWith(targetDate))
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                document.getElementById('chartTitle').textContent = `${targetDate} 單日血糖曲線`;
+
+                labels = filtered.map(r => r.timestamp.split('T')[1].slice(0, 5));
+            }
+
+            // 更新 4 格統計卡片
+            updateStatsCards(filtered);
+
+            if (filtered.length === 0) {
+                return;
+            }
+
+            values = filtered.map(r => currentUnit === 'mg/dL' ? r.bgMg : mgToMmol(r.bgMg));
+            pointColors = filtered.map(r => getBgCategory(r.bgMg).dotColor);
+
+            // 若為單日曲線模式，找出最低點 Nadir
+            if (currentChartMode === 'curve' && filtered.length > 0) {
+                let minMg = Infinity;
+                filtered.forEach((r, idx) => {
+                    if (r.bgMg < minMg) {
+                        minMg = r.bgMg;
+                        nadirIndex = idx;
+                    }
+                });
+
+                const nadirRec = filtered[nadirIndex];
+                const nadirTime = nadirRec.timestamp.split('T')[1].slice(0, 5);
+                const nadirDisp = formatBgValue(nadirRec.bgMg);
+                document.getElementById('nadirCallout').classList.remove('hidden');
+                document.getElementById('nadirText').innerHTML = `當日波谷 (Nadir) 出現在 <strong>${nadirTime}</strong>，最低血糖為 <strong>${nadirDisp} ${currentUnit}</strong>。`;
+            }
+
+            // 理想區間與警戒線換算
+            const targetMin = currentUnit === 'mg/dL' ? 80 : 4.4;
+            const targetMax = currentUnit === 'mg/dL' ? 150 : 8.3;
+            const hypoLine = currentUnit === 'mg/dL' ? 60 : 3.3;
+            const suggestedMax = currentUnit === 'mg/dL' ? Math.max(300, ...values) + 20 : Math.max(16.7, ...values) + 1.5;
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `血糖 (${currentUnit})`,
+                        data: values,
+                        borderColor: '#2A9D8F',
+                        backgroundColor: 'rgba(42, 157, 143, 0.12)',
+                        borderWidth: 2.5,
+                        tension: 0.3,
+                        fill: false,
+                        pointBackgroundColor: pointColors,
+                        pointBorderColor: '#FFFFFF',
+                        pointBorderWidth: 2,
+                        pointRadius: values.map((_, i) => i === nadirIndex ? 8 : 5),
+                        pointHoverRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1E293B',
+                            padding: 10,
+                            cornerRadius: 10,
+                            callbacks: {
+                                label: function(context) {
+                                    const rec = filtered[context.dataIndex];
+                                    const lines = [`血糖: ${context.parsed.y} ${currentUnit} (${rec.timing})`];
+                                    if (rec.insulin > 0) lines.push(`胰島素: ${rec.insulin} U (${rec.site})`);
+                                    if (rec.index === nadirIndex) lines.push('⭐ 當日最低點 Nadir');
+                                    return lines;
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                idealZone: {
+                                    type: 'box',
+                                    yMin: targetMin,
+                                    yMax: targetMax,
+                                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                    borderWidth: 0
+                                },
+                                hypoThreshold: {
+                                    type: 'line',
+                                    yMin: hypoLine,
+                                    yMax: hypoLine,
+                                    borderColor: 'rgba(239, 68, 68, 0.7)',
+                                    borderWidth: 1.5,
+                                    borderDash: [4, 4]
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: 0,
+                            suggestedMax: suggestedMax,
+                            grid: { color: '#F1F5F9' },
+                            ticks: { font: { size: 10 }, color: '#64748B' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 10 }, color: '#64748B', maxRotation: 45 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateStatsCards(dataset) {
+            if (!dataset || dataset.length === 0) {
+                document.getElementById('statAvgBg').textContent = '--';
+                document.getElementById('statMinMaxBg').textContent = '-- / --';
+                document.getElementById('statInRange').textContent = '--%';
+                document.getElementById('statAvgInsulin').textContent = '--';
+                return;
+            }
+
+            const sumBg = dataset.reduce((acc, r) => acc + r.bgMg, 0);
+            const avgMg = sumBg / dataset.length;
+            const minMg = Math.min(...dataset.map(r => r.bgMg));
+            const maxMg = Math.max(...dataset.map(r => r.bgMg));
+            const inRangeCount = dataset.filter(r => r.bgMg >= 80 && r.bgMg <= 150).length;
+            const inRangePct = Math.round((inRangeCount / dataset.length) * 100);
+
+            const insulinShots = dataset.filter(r => r.insulin > 0);
+            const avgDose = insulinShots.length > 0
+                ? (insulinShots.reduce((acc, r) => acc + r.insulin, 0) / insulinShots.length).toFixed(2)
+                : '0';
+
+            document.getElementById('statAvgBg').textContent = formatBgValue(avgMg);
+            document.getElementById('statMinMaxBg').textContent = `${formatBgValue(minMg)} / ${formatBgValue(maxMg)}`;
+            document.getElementById('statInRange').textContent = `${inRangePct}%`;
+            document.getElementById('statAvgInsulin').textContent = parseFloat(avgDose);
+        }
+
+        // ==================== 7. 歷史日誌渲染 ====================
+        function renderHistoryList() {
+            const container = document.getElementById('historyListContainer');
+            document.getElementById('totalRecordsCount').textContent = `共 ${records.length} 筆`;
+
+            if (records.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-white rounded-2xl p-8 text-center border border-stone-100 space-y-2">
+                        <div class="w-12 h-12 rounded-full bg-stone-100 text-slate-400 flex items-center justify-center mx-auto">
+                            <i class="fa-solid fa-paw text-xl"></i>
+                        </div>
+                        <p class="text-sm font-bold text-slate-600">目前還沒有任何紀錄</p>
+                        <p class="text-xs text-slate-400">點擊下方「今日紀錄」開始為毛孩記錄第一筆血糖吧！</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // 依日期分組
+            const groups = {};
+            records.forEach(r => {
+                const dateKey = r.timestamp.split('T')[0];
+                if (!groups[dateKey]) groups[dateKey] = [];
+                groups[dateKey].push(r);
+            });
+
+            let html = '';
+            Object.keys(groups).sort((a, b) => b.localeCompare(a)).forEach(dateKey => {
+                const dayItems = groups[dateKey];
+                html += `
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between px-1">
+                            <span class="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                                <i class="fa-regular fa-calendar text-teal-600"></i> ${dateKey}
+                            </span>
+                            <span class="text-[11px] text-slate-400">${dayItems.length} 筆測量</span>
+                        </div>
+                        <div class="space-y-2.5">
+                `;
+
+                dayItems.forEach(item => {
+                    const timeStr = item.timestamp.split('T')[1].slice(0, 5);
+                    const cat = getBgCategory(item.bgMg);
+                    const dispBg = formatBgValue(item.bgMg);
+
+                    const timingMap = {
+                        'AMPS': '早餐前 AMPS',
+                        'PMPS': '晚餐前 PMPS',
+                        'Nadir': '曲線追蹤',
+                        'Other': '其他時段'
+                    };
+
+                    html += `
+                        <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-stone-100 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-bold bg-stone-100 text-slate-700 px-2 py-0.5 rounded-lg">${timeStr}</span>
+                                    <span class="text-xs font-semibold text-slate-500">${timingMap[item.timing] || item.timing}</span>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <button onclick="editRecord('${item.id}')" class="w-7 h-7 rounded-lg bg-stone-50 text-slate-400 hover:text-teal-600 flex items-center justify-center transition" title="編輯">
+                                        <i class="fa-solid fa-pen text-xs"></i>
+                                    </button>
+                                    <button onclick="deleteRecord('${item.id}')" class="w-7 h-7 rounded-lg bg-stone-50 text-slate-400 hover:text-rose-600 flex items-center justify-center transition" title="刪除">
+                                        <i class="fa-solid fa-trash-can text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between bg-stone-50/80 rounded-xl p-2.5">
+                                <div class="flex items-baseline gap-1.5">
+                                    <span class="text-2xl font-bold text-slate-800">${dispBg}</span>
+                                    <span class="text-xs font-bold text-slate-400">${currentUnit}</span>
+                                    <span class="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cat.badgeClass}">${cat.label}</span>
+                                </div>
+
+                                <div class="text-right">
+                                    ${item.insulin > 0 
+                                        ? `<div class="text-xs font-bold text-teal-700"><i class="fa-solid fa-syringe mr-1"></i>${item.insulin} U</div>
+                                           <div class="text-[10px] text-slate-400">${item.site}</div>`
+                                        : `<div class="text-xs font-medium text-slate-400">未施打</div>`
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- 生理標籤與備註 -->
+                            <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                <span class="px-2 py-0.5 rounded-md bg-warm-50 text-warm-600 font-medium border border-warm-200/60">
+                                    進食: ${item.appetite}
+                                </span>
+                                <span class="px-2 py-0.5 rounded-md bg-stone-50 text-slate-600 border border-stone-200/60">
+                                    飲水: ${item.water}
+                                </span>
+                                <span class="px-2 py-0.5 rounded-md bg-stone-50 text-slate-600 border border-stone-200/60">
+                                    尿量: ${item.urine}
+                                </span>
+                            </div>
+                            ${item.note ? `<p class="text-xs text-slate-500 bg-stone-50 px-2.5 py-1.5 rounded-lg border-l-2 border-teal-400">${item.note}</p>` : ''}
+                        </div>
+                    `;
+                });
+
+                html += `</div></div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // ==================== 8. 獸醫回診報告與 CSV 匯出 ====================
+        function generateVetReportText() {
+            const previewEl = document.getElementById('vetSummaryPreview');
+            if (records.length === 0) {
+                previewEl.textContent = '目前尚無紀錄可產生報告。';
+                return '';
+            }
+
+            // 取最近 7 天的紀錄
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 7);
+            const recent = records.filter(r => new Date(r.timestamp) >= cutoff);
+            const targetList = recent.length > 0 ? recent : records.slice(0, 14);
+
+            const avgMg = targetList.reduce((acc, r) => acc + r.bgMg, 0) / targetList.length;
+            const minMg = Math.min(...targetList.map(r => r.bgMg));
+            const maxMg = Math.max(...targetList.map(r => r.bgMg));
+
+            let report = `【糖貓居家血糖追蹤摘要】\n`;
+            report += `貓咪姓名：${catProfile.name} (體重: ${catProfile.weight} kg)\n`;
+            report += `使用胰島素：${catProfile.insulinType}\n`;
+            report += `統計筆數：近期共 ${targetList.length} 筆紀錄\n`;
+            report += `平均血糖：${formatBgValue(avgMg)} ${currentUnit} (範圍: ${formatBgValue(minMg)} ~ ${formatBgValue(maxMg)})\n`;
+            report += `----------------------------------\n`;
+
+            targetList.slice(0, 15).forEach(r => {
+                const dt = r.timestamp.replace('T', ' ');
+                const doseStr = r.insulin > 0 ? `${r.insulin}U (${r.site})` : '未施打';
+                report += `• ${dt} [${r.timing}] 血糖: ${formatBgValue(r.bgMg)} ${currentUnit} | 劑量: ${doseStr} | 食慾:${r.appetite}`;
+                if (r.note) report += ` (${r.note})`;
+                report += `\n`;
+            });
+
+            previewEl.textContent = report;
+            return report;
+        }
+
+        function copyVetReport() {
+            const text = generateVetReportText();
+            if (!text) return;
+
+            // 使用兼容性最佳的 textarea + execCommand('copy')
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showToast('回診報告已複製到剪貼簿！可直接貼給獸醫');
+            } catch (err) {
+                showToast('複製失敗，請手動選取文字複製', true);
+            }
+            document.body.removeChild(textArea);
+        }
+
+        function exportCSV() {
+            if (records.length === 0) {
+                showToast('目前沒有資料可匯出', true);
+                return;
+            }
+
+            // 加入 UTF-8 BOM 確保 Excel 開啟繁體中文不亂碼
+            let csvContent = '\uFEFF';
+            csvContent += '日期時間,測量時段,血糖(mg/dL),血糖(mmol/L),胰島素劑量(U),注射部位,進食狀況,飲水量,尿量,備註\n';
+
+            records.forEach(r => {
+                const dt = r.timestamp.replace('T', ' ');
+                const mmol = mgToMmol(r.bgMg);
+                const safeNote = `"${(r.note || '').replace(/"/g, '""')}"`;
+                csvContent += `${dt},${r.timing},${r.bgMg},${mmol},${r.insulin},${r.site},${r.appetite},${r.water},${r.urine},${safeNote}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const todayStr = new Date().toISOString().slice(0, 10);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${catProfile.name}_血糖紀錄_${todayStr}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            showToast('CSV 報表已開始下載！');
+        }
+
+        // ==================== 9. 彈窗與示範數據管理 ====================
+        function showToast(msg, isWarning = false) {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            const msgEl = document.getElementById('toastMsg');
+
+            msgEl.textContent = msg;
+            icon.className = isWarning 
+                ? 'fa-solid fa-triangle-exclamation text-amber-400' 
+                : 'fa-solid fa-circle-check text-teal-400';
+
+            toast.classList.remove('opacity-0', 'translate-y-[-10px]');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-[-10px]');
+                toast.classList.remove('opacity-100', 'translate-y-0');
+            }, 2800);
+        }
+
+        function openCustomModal(title, body, onConfirm) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalBody').textContent = body;
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+            confirmBtn.onclick = () => {
+                closeCustomModal();
+                onConfirm();
+            };
+            const modal = document.getElementById('customModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeCustomModal() {
+            const modal = document.getElementById('customModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmClearDemoData() {
+            openCustomModal(
+                '清空所有資料',
+                '確定要清除目前的示範數據（或所有現有紀錄），並重新開始為您的貓咪建立專屬紀錄嗎？',
+                () => {
+                    records = [];
+                    saveRecordsToStorage(false);
+                    renderAllViews();
+                    updateSiteSuggestion();
+                    showToast('已清空資料，現在可以開始正式記錄囉！');
+                }
+            );
+        }
+
+        function loadDemoDataConfirm() {
+            openCustomModal(
+                '載入示範數據',
+                '這將會以內建的示範數據覆蓋目前的紀錄，確定要載入嗎？',
+                () => {
+                    records = generateDemoRecords();
+                    saveRecordsToStorage(true);
+                    renderAllViews();
+                    showToast('已載入示範數據');
+                }
+            );
+        }
+
+        // 貓咪檔案設定視窗
+        function openCatProfileModal() {
+            document.getElementById('inputCatName').value = catProfile.name;
+            document.getElementById('inputInsulinType').value = catProfile.insulinType;
+            document.getElementById('inputCatWeight').value = catProfile.weight;
+            const modal = document.getElementById('catProfileModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeCatProfileModal() {
+            const modal = document.getElementById('catProfileModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveCatProfile() {
+            catProfile.name = document.getElementById('inputCatName').value.trim() || '毛孩';
+            catProfile.insulinType = document.getElementById('inputInsulinType').value.trim() || '未設定';
+            catProfile.weight = document.getElementById('inputCatWeight').value || '--';
+
+            localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(catProfile));
+            document.getElementById('catNameBadge').textContent = `${catProfile.name} 🐾`;
+            closeCatProfileModal();
+            generateVetReportText();
+            showToast('已更新貓咪基本資料');
+        }
+    </script>
+    <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('SW 註冊成功:', reg.scope))
+          .catch(err => console.log('SW 註冊失敗:', err));
+      });
+    }
+    </script>
+</body>
+</html>
