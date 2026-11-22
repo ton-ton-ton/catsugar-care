@@ -1,17 +1,16 @@
 {
-  "name": "糖貓日記 CatSugar Care",
+  "name": "糖貓日記",
   "short_name": "糖貓日記",
-  "description": "糖尿病貓咪血糖曲線、胰島素劑量與日常健康追蹤",
-  "start_url": "./index.html",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#0d9488",
-  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
-      "src": "./icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
